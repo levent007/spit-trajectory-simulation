@@ -8,7 +8,7 @@ const CAR_SPEED = 22.22; // 汽车速度 (m/s)
 const SPIT_SPEED = 5;    // 吐痰速度 (m/s)
 const GRAVITY = 9.8;     // 重力加速度 (m/s²)
 const AIR_DENSITY = 1.225; // 空气密度 (kg/m³)
-const SPHERE_RADIUS = 0.01; // 痰液半径 (m)
+const SPHERE_RADIUS = 0.05; // 痰液半径 (m)
 const SPHERE_MASS = 0.01;   // 痰液质量 (kg)
 const DRAG_COEFFICIENT = 0.47; // 球体阻力系数
 
@@ -148,7 +148,9 @@ const spitGeometry = new THREE.SphereGeometry(SPHERE_RADIUS);
 const spitMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x00ff00,
     roughness: 0.3,
-    metalness: 0.7
+    metalness: 0.7,
+    emissive: 0x00ff00, // 添加自发光
+    emissiveIntensity: 0.5
 });
 const spit = new THREE.Mesh(spitGeometry, spitMaterial);
 scene.add(spit);
@@ -156,9 +158,16 @@ scene.add(spit);
 // 轨迹点数组
 const trajectoryPoints = [];
 const trajectoryGeometry = new THREE.BufferGeometry();
-const trajectoryMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
+const trajectoryMaterial = new THREE.LineBasicMaterial({ color: 0x800080 }); // 紫色轨迹
 const trajectoryLine = new THREE.Line(trajectoryGeometry, trajectoryMaterial);
 scene.add(trajectoryLine);
+
+// 添加轨迹投影
+const projectionPoints = [];
+const projectionGeometry = new THREE.BufferGeometry();
+const projectionMaterial = new THREE.LineBasicMaterial({ color: 0x000000 }); // 黑色投影
+const projectionLine = new THREE.Line(projectionGeometry, projectionMaterial);
+scene.add(projectionLine);
 
 // 添加调试信息显示
 const debugInfo = document.createElement('div');
@@ -171,6 +180,62 @@ debugInfo.style.fontSize = '14px';
 debugInfo.style.backgroundColor = 'rgba(0,0,0,0.5)';
 debugInfo.style.padding = '10px';
 document.body.appendChild(debugInfo);
+
+// 添加控制面板
+const controlsPanel = document.createElement('div');
+controlsPanel.style.position = 'absolute';
+controlsPanel.style.bottom = '20px';
+controlsPanel.style.left = '20px';
+controlsPanel.style.backgroundColor = 'rgba(0,0,0,0.5)';
+controlsPanel.style.padding = '10px';
+controlsPanel.style.borderRadius = '5px';
+controlsPanel.style.color = 'white';
+controlsPanel.style.fontFamily = 'Arial';
+document.body.appendChild(controlsPanel);
+
+// 添加速度控制
+const speedLabel = document.createElement('div');
+speedLabel.innerHTML = '模拟速度:';
+controlsPanel.appendChild(speedLabel);
+
+const speedControl = document.createElement('input');
+speedControl.type = 'range';
+speedControl.min = '0.1';
+speedControl.max = '2';
+speedControl.step = '0.1';
+speedControl.value = '1';
+speedControl.style.width = '200px';
+controlsPanel.appendChild(speedControl);
+
+// 添加时间进度条
+const timeLabel = document.createElement('div');
+timeLabel.innerHTML = '时间进度:';
+controlsPanel.appendChild(timeLabel);
+
+const timeProgress = document.createElement('input');
+timeProgress.type = 'range';
+timeProgress.min = '0';
+timeProgress.max = '100';
+timeProgress.value = '0';
+timeProgress.style.width = '200px';
+controlsPanel.appendChild(timeProgress);
+
+// 添加暂停/继续按钮
+const pauseButton = document.createElement('button');
+pauseButton.innerHTML = '暂停';
+pauseButton.style.marginTop = '10px';
+pauseButton.style.padding = '5px 10px';
+pauseButton.style.borderRadius = '5px';
+pauseButton.style.border = 'none';
+pauseButton.style.backgroundColor = '#4CAF50';
+pauseButton.style.color = 'white';
+pauseButton.style.cursor = 'pointer';
+controlsPanel.appendChild(pauseButton);
+
+pauseButton.addEventListener('click', () => {
+    isPaused = !isPaused;
+    pauseButton.innerHTML = isPaused ? '继续' : '暂停';
+});
 
 // 计算空气阻力
 function calculateDragForce(velocity) {
@@ -187,43 +252,97 @@ let position = new THREE.Vector3(0, 1.5, 0);
 let velocity = new THREE.Vector3(CAR_SPEED, 0, SPIT_SPEED);
 
 // 修改动画循环
+let isPaused = false;
+let simulationSpeed = 1;
+let maxTime = 0;
+
 function animate() {
     requestAnimationFrame(animate);
-    controls.update(); // 更新控制器
+    controls.update();
 
-    // 更新汽车位置
-    car.position.x = time * CAR_SPEED;
-
-    // 更新痰液位置
-    if (position.y > 0) {
-        // 计算合力
-        const dragForce = calculateDragForce(velocity);
-        const gravityForce = new THREE.Vector3(0, -GRAVITY * SPHERE_MASS, 0);
-        const totalForce = dragForce.add(gravityForce);
-
-        // 更新速度和位置
-        const acceleration = totalForce.divideScalar(SPHERE_MASS);
-        velocity.add(acceleration.multiplyScalar(dt));
-        position.add(velocity.clone().multiplyScalar(dt));
+    if (!isPaused) {
+        // 更新汽车位置
+        car.position.x = time * CAR_SPEED;
 
         // 更新痰液位置
-        spit.position.copy(position);
+        if (position.y > 0) {
+            // 计算合力
+            const dragForce = calculateDragForce(velocity);
+            const gravityForce = new THREE.Vector3(0, -GRAVITY * SPHERE_MASS, 0);
+            const totalForce = dragForce.add(gravityForce);
 
-        // 添加轨迹点
-        trajectoryPoints.push(position.clone());
-        trajectoryGeometry.setFromPoints(trajectoryPoints);
+            // 更新速度和位置
+            const acceleration = totalForce.divideScalar(SPHERE_MASS);
+            velocity.add(acceleration.multiplyScalar(dt * simulationSpeed));
+            position.add(velocity.clone().multiplyScalar(dt * simulationSpeed));
 
-        // 更新调试信息
-        debugInfo.innerHTML = `
-            时间: ${time.toFixed(2)}s<br>
-            位置: (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})<br>
-            速度: (${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)}, ${velocity.z.toFixed(2)})<br>
-            轨迹点数: ${trajectoryPoints.length}
-        `;
+            // 更新痰液位置
+            spit.position.copy(position);
+
+            // 添加轨迹点
+            trajectoryPoints.push(position.clone());
+            trajectoryGeometry.setFromPoints(trajectoryPoints);
+
+            // 添加投影点
+            const projectionPoint = position.clone();
+            projectionPoint.y = 0;
+            projectionPoints.push(projectionPoint);
+            projectionGeometry.setFromPoints(projectionPoints);
+
+            // 更新最大时间
+            maxTime = Math.max(maxTime, time);
+        }
+
+        time += dt * simulationSpeed;
+        timeProgress.value = (time / maxTime) * 100;
     }
 
-    time += dt;
     renderer.render(scene, camera);
 }
+
+// 添加事件监听器
+speedControl.addEventListener('input', (e) => {
+    simulationSpeed = parseFloat(e.target.value);
+});
+
+timeProgress.addEventListener('input', (e) => {
+    const progress = parseFloat(e.target.value) / 100;
+    time = progress * maxTime;
+    
+    // 重置轨迹
+    trajectoryPoints.length = 0;
+    projectionPoints.length = 0;
+    
+    // 重新计算位置
+    const tempTime = 0;
+    const tempPosition = new THREE.Vector3(0, 1.5, 0);
+    const tempVelocity = new THREE.Vector3(CAR_SPEED, 0, SPIT_SPEED);
+    
+    while (tempTime < time) {
+        const dragForce = calculateDragForce(tempVelocity);
+        const gravityForce = new THREE.Vector3(0, -GRAVITY * SPHERE_MASS, 0);
+        const totalForce = dragForce.add(gravityForce);
+        const acceleration = totalForce.divideScalar(SPHERE_MASS);
+        
+        tempVelocity.add(acceleration.multiplyScalar(dt));
+        tempPosition.add(tempVelocity.clone().multiplyScalar(dt));
+        
+        if (tempPosition.y > 0) {
+            trajectoryPoints.push(tempPosition.clone());
+            const projectionPoint = tempPosition.clone();
+            projectionPoint.y = 0;
+            projectionPoints.push(projectionPoint);
+        }
+        
+        tempTime += dt;
+    }
+    
+    trajectoryGeometry.setFromPoints(trajectoryPoints);
+    projectionGeometry.setFromPoints(projectionPoints);
+    position.copy(tempPosition);
+    velocity.copy(tempVelocity);
+    spit.position.copy(position);
+    car.position.x = time * CAR_SPEED;
+});
 
 animate(); 
